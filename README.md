@@ -1,2 +1,2 @@
 # nbm-verify
-Verification scripts for the NBM/
+Verification scripts for the NBM
