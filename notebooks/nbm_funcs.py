@@ -17,19 +17,22 @@ colors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442",
           "#0072B2", "#D55E00", "#CC79A7", "#999999"]
 
 _site, _date0, _date1 = None, None, None
+_init_hours, _dates = None, None
 _datadir, _figdir = None, None
 _thresholds, _thresh_id = None, None
 
-def get_1d_csv(get_req, this, total):
+def get_1d_csv(get_req, this, total, verbose=True):
     
     _date, _init_hour, _url = get_req
     
     try:
         response = req.urlopen(_url).read().decode('utf-8')
-        print('\r[%d/%d] %s %s'%(this, total, _date, _init_hour), end='')
+        if verbose:
+            print('\r[%d/%d] %s %s'%(this, total, _date, _init_hour), end='')
         
     except:
-        print('\r[%d/%d] NOT FOUND %s %s'%(this, total, _date, _init_hour), end='')
+        if verbose:
+            print('\r[%d/%d] NOT FOUND %s %s'%(this, total, _date, _init_hour), end='')
         return None
     
     else:
@@ -233,14 +236,16 @@ def histograms_verif_rank(_data, _interval, _short, _long, _plot_type, _plot_var
     ax.set_title(('{} Percentile-Matched {}\nNBM v3.2 {} – {}\n\nEvent Size: {} ({:.2f} – {:.2f} in)\n' + 
                   'Interval: {} h | Lead Time: {} – {} h\nn={}, np={}\n').format(
                 _site, _plot_type, _date0.strftime('%Y-%m-%d'), _date1.strftime('%Y-%m-%d'),
-                _esize, _thresholds[_interval][_thresh_id[_esize][0]], _thresholds[_interval][_thresh_id[_esize][1]],
+                _esize, _thresholds[_interval][_thresh_id[_esize][0]], 
+                _thresholds[_interval][_thresh_id[_esize][1]],
                 _interval, _short, _long, len(select), n_precip_periods), size=font_size)
 
     ax.legend(loc='upper left', fontsize='small')
     ax.grid()
     plt.tight_layout()
 
-    savestr = '{}_{}h_sz{}_lead{}-{}h.rankPDF.{}.png'.format(_site, _interval, _esize, _short, _long, _plot_type.lower())
+    savestr = '{}_{}h_sz{}_lead{}-{}h.rankPDF.{}.png'.format(
+        _site, _interval, _esize, _short, _long, _plot_type.lower())
     os.makedirs(_figdir + 'reliabilityCDF/', exist_ok=True)
     plt.savefig(_figdir + 'reliabilityCDF/' + savestr, dpi=150)
 
@@ -249,3 +254,236 @@ def histograms_verif_rank(_data, _interval, _short, _long, _plot_type, _plot_var
     else:
         print(savestr)
         plt.close()
+        
+def reliability_verif_cdf(_data, _interval, _short, _long, _plot_type, _plot_var, _esize, show=False):
+    
+    select = _data[((_data['Interval'] == _interval)
+                & ((_data['LeadTime'] >= _short) 
+                & (_data['LeadTime'] <= _long)))]
+
+    select = select[select['EventSize'] == _esize] if _esize != 'All' else select
+
+    # Produce the actual reliability diagram
+    font_size = 16
+    plt.rcParams.update({'font.size': font_size})
+    fig, ax = plt.subplots(1, figsize=(10, 10), facecolor='w')
+
+    pbinsize = 5
+    pbins = np.arange(0, 101, pbinsize)
+
+    hist = ax.hist(select[_plot_var], bins=pbins, density=True, cumulative=True,
+            color='w', alpha=0, linewidth=3.5, zorder=10)
+    histy, histx = hist[0]*100, hist[1][1:]-(pbinsize/2)
+
+    ax.plot(histx, histy, marker='x', linestyle='--', markersize=10, color='k', linewidth=2)
+
+    ax.plot(np.arange(0, 101, 1), np.arange(0, 101, 1), '--k', linewidth=1, zorder=20)
+
+    ax.set_xticks(np.arange(0, 101, 5))
+    ax.set_xlim([0, 101])
+
+    ax.set_yticks(np.arange(0, 101, 5))
+    ax.set_yticklabels(np.arange(0, 101, 5), rotation=30)
+    ax.set_ylim([0, 101])
+
+    ax.set_yticklabels(np.arange(100, -5, -5), rotation=30)
+
+    ax.set_ylabel('\nObserved in % of Forecasts')
+    ax.set_xlabel('\nForecast Verifies At/Above Percentile\n')
+
+    n_precip_periods = np.unique(select['ValidTime'][~np.isnan(select['verif_ob'])]).shape[0]
+    ax.set_title(('{} Percentile-Matched {}\nNBM v3.2 {} – {}\n\nEvent Size: {} ({:.2f} – {:.2f} in)\n' + 
+                  'Interval: {} h | Lead Time: {} – {} h\nn={}, np={}\n').format(
+                _site, _plot_type, _date0.strftime('%Y-%m-%d'), _date1.strftime('%Y-%m-%d'),
+                _esize, _thresholds[_interval][_thresh_id[_esize][0]], 
+                _thresholds[_interval][_thresh_id[_esize][1]],
+                _interval, _short, _long, len(select), n_precip_periods), size=font_size)
+
+    ax.text(5, 92, 'Wet Bias')
+    ax.text(85, 6, 'Dry Bias')
+    ax.text(35, 38, 'Unbiased Distribution', rotation=40)
+
+    # ax.legend(loc='upper left')
+    ax.grid()
+    plt.tight_layout()
+
+    savestr = '{}_{}h_sz{}_lead{}-{}h.reliabilityCDF.{}.png'.format(
+        _site, _interval, _esize, _short, _long, _plot_type.lower())
+    print(savestr)
+
+    os.makedirs(_figdir + 'reliabilityCDF/', exist_ok=True)
+    plt.savefig(_figdir + 'reliabilityCDF/' + savestr, dpi=150)
+
+    if show:
+        plt.show()
+    else:
+        print(savestr)
+        plt.close()
+        
+def rank_over_leadtime(_data, _interval, _short, _long, _esize, show=False):
+
+    select = _data[((_data['Interval'] == _interval)
+                & ((_data['LeadTime'] >= _short) 
+                & (_data['LeadTime'] <= _long)))]
+
+    select = select[select['EventSize'] == _esize] if _esize != 'All' else select
+
+    t0, t1 = [threshold_sets[ei][0], threshold_sets[ei][1]] if _esize != 'All' else [0, round(np.nanmax(select['verif_ob']), 2)]
+
+    plt.rcParams.update({'font.size': 13})
+    fig, axs = plt.subplots(1, 3, figsize=(20, 8), facecolor='w')
+    ax3, ax1, ax2 = axs.flatten()
+    ms, lw = 50, 1
+
+    for i, lead_time in enumerate(np.unique(select['LeadTime'])):
+
+        lead_data = select[select['LeadTime'] == lead_time]
+        lead_data = lead_data.dropna()
+
+        # Lead time vs Mean Rank Verification
+        label = 'Mean Verification Rank' if i == 0 else None
+        ax1.scatter(lead_time, np.nanmean(lead_data['verif_rank']), c='g', marker='_', s=ms*5, linewidth=lw*2, label=label)
+
+        label = 'Median Verification Rank' if i == 0 else None
+        ax1.scatter(lead_time, np.nanpercentile(lead_data['verif_rank'], 50), c='r',marker='_', s=ms*5, linewidth=lw*2, label=label)
+
+        # Lead time vs Mean Deterministic Comparason
+        label = 'Mean Deterministic Rank' if i == 0 else None
+        ax2.scatter(lead_time, np.nanmean(lead_data['det_rank']), c='g', marker='_', s=ms*5, linewidth=lw*2, label=label)
+
+        label = 'Median Deterministic Rank' if i == 0 else None
+        ax2.scatter(lead_time, np.nanpercentile(lead_data['det_rank'], 50), c='r', marker='_', s=ms*5, linewidth=lw*2, label=label)
+
+        ax3.scatter(lead_time, np.nanmean(lead_data['det_fx'] - lead_data['verif_ob']), c='k', marker='_', s=ms*5, linewidth=lw*2)
+        # ax3.scatter(lead_time, np.nanmean(lead_data['verif_rank_val'] - lead_data['verif_ob']), c='C0', marker='_', s=ms*5, linewidth=lw*2)
+        ax3.scatter(lead_time, np.nanmean(lead_data['mean_fx'] - lead_data['verif_ob']), c='g', marker='_', s=ms*5, linewidth=lw*2)
+        ax3.scatter(lead_time, np.nanmean(lead_data['med_fx'] - lead_data['verif_ob']), c='r', marker='_', s=ms*5, linewidth=lw*2)
+
+    ax3.scatter(-10, 0, c='k', marker='_', s=ms*5, linewidth=lw*2, label='Deterministic')
+    # ax3.scatter(-10, 0, c='C0', marker='_', s=ms*5, linewidth=lw*2, label='Rank-Matched')
+    ax3.scatter(-10, 0, c='g', marker='_', s=ms*5, linewidth=lw*2, label='Mean')
+    ax3.scatter(-10, 0, c='r', marker='_', s=ms*5, linewidth=lw*2, label='Median')
+
+    for ax in axs:
+        ax.set_xticks(np.arange(_short, _long+1, 12))
+        ax.set_xlim([_short-6, _long+2.5])
+        ax.set_xticklabels(np.arange(_short, _long+1, 12), rotation=45)
+        ax.set_yticks(np.arange(0, 101, 10))
+        ax.legend(loc='lower right', fontsize='small')
+        ax.grid()
+        ax.set_xlim([_short, _long+2.5])
+
+    ax3.set_ylabel('Mean Error (in)\n(Forecast - Observation)\n')
+
+    for ax in [ax3]:
+        ax.axhline(0, color='k', linestyle='--', linewidth=1.5)
+        ax.set_yticks(np.arange(-.5, .251, .05))
+        ax.set_ylim([-.5, .25])
+        ax.legend(loc='lower left', fontsize='small')
+        ax.set_xlabel('Lead Time')
+        
+    n_precip_periods = np.unique(select['ValidTime'][~np.isnan(select['verif_ob'])]).shape[0]
+    plt.suptitle(('{} Percentile-Matched Verification\nNBM v3.2 {} – {}\n\nEvent Size: {} ({:.2f} – {:.2f} in)\n' + 
+                  'Interval: {} h | Lead Time: {} – {} h\nn={}, np={}\n').format(
+                _site, _date0.strftime('%Y-%m-%d'), _date1.strftime('%Y-%m-%d'),
+                _esize, _thresholds[_interval][_thresh_id[_esize][0]], 
+                _thresholds[_interval][_thresh_id[_esize][1]],
+                _interval, _short, _long, len(select), n_precip_periods))
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.85])
+
+    savestr = '{}_{}h_sz{}_lead{}-{}h.rank_err_overtime.png'.format(_site, _interval, _esize, _short, _long)
+    print(savestr)
+
+    os.makedirs(_figdir + 'rank_err_overtime/', exist_ok=True)
+    plt.savefig(_figdir + 'rank_err_overtime/' + savestr, dpi=150)
+
+    if show:
+        plt.show()
+    else:
+        print(savestr)
+        plt.close()
+        
+def get_nbm_1d(_stid, verbose=False):
+    
+    nbmfile = _datadir + '%s_nbm_%s_%s.pd'%(_stid, _date0.strftime('%Y%m%d'), _date1.strftime('%Y%m%d'))
+    
+    if os.path.isfile(nbmfile):
+        # Load file
+        _nbm = pd.read_pickle(nbmfile)
+        print('Loaded NBM from file %s'%nbmfile)
+
+    else:
+        url_list = []
+        for date in _dates:
+            for init_hour in _init_hours:
+                # For now pull from the csv generator
+                # Best to get API access or store locally later
+                base = 'https://hwp-viz.gsd.esrl.noaa.gov/wave1d/data/archive/'
+                datestr = '{:04d}/{:02d}/{:02d}'.format(date.year, date.month, date.day)
+                sitestr = '/NBM/{:02d}/{:s}.csv'.format(init_hour, _stid)
+                url_list.append([date, init_hour, base + datestr + sitestr])
+        
+        # Try multiprocessing this for speed?
+        _nbm = np.array([get_1d_csv(url, this=i+1, total=len(url_list),
+                                    verbose=verbose) for i, url in enumerate(url_list)])
+        _nbm = np.array([line for line in _nbm if line is not None])
+
+        try:
+            header = _nbm[0, 0]
+            
+        except:
+            print('No NBM 1D Flat File for %s'%_stid)
+            _nbm = (_stid, None)
+            
+        else:
+            print('Producing NBM data from 1D Flat File for %s'%_stid)
+            # This drops days with incomplete collections. There may be some use
+            # to keeping this data, can fix in the future if need be
+            # May also want to make the 100 value flexible!
+            _nbm = np.array([np.array(line[1]) for line in _nbm if len(line[1]) == 100])
+
+            _nbm = _nbm.reshape(-1, _nbm.shape[-1])
+            _nbm[np.where(_nbm == '')] = np.nan
+
+            # Aggregate to a clean dataframe
+            _nbm = pd.DataFrame(_nbm, columns=header).set_index(
+                ['InitTime', 'ValidTime']).sort_index()
+
+            # Drop last column (misc metadata?)
+            _nbm = _nbm.iloc[:, :-2].astype(float)
+            header = _nbm.columns
+
+            # variables = np.unique([k.split('_')[0] for k in header])
+            # levels = np.unique([k.split('_')[1] for k in header])
+
+            init =  _nbm.index.get_level_values(0)
+            valid = _nbm.index.get_level_values(1)
+
+            # Note the 1h 'fudge factor' in the lead time here
+            lead = pd.DataFrame(
+                np.transpose([init, valid, ((valid - init).values/3600/1e9).astype(int)+1]), 
+                columns=['InitTime', 'ValidTime', 'LeadTime']).set_index(['InitTime', 'ValidTime'])
+
+            _nbm.insert(0, 'LeadTime', lead)
+
+            klist = np.array([k for k in np.unique([k for k in list(_nbm.keys())]) if ('APCP' in k)&('1hr' not in k)])
+            klist = klist[np.argsort(klist)]
+            klist = np.append('LeadTime', klist)
+            _nbm = _nbm.loc[:, klist]
+
+            # Nix values where lead time shorter than acc interval
+            for k in _nbm.keys():
+                if 'APCP24hr' in k:
+                    _nbm[k][_nbm['LeadTime'] < 24] = np.nan
+                elif 'APCP12hr' in k:
+                    _nbm[k][_nbm['LeadTime'] < 12] = np.nan
+                elif 'APCP6hr' in k:
+                    _nbm[k][_nbm['LeadTime'] < 6] = np.nan
+                else:
+                    pass
+
+            _nbm.to_pickle(nbmfile)
+            print('\nSaved NBM to file %s'%nbmfile)
+    
+    return (_stid, _nbm)
