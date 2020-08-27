@@ -55,7 +55,7 @@ def get_1d_csv(get_req, this, total, verbose=True):
         return header, lines
     
 
-def get_precip_obs(s, d0, d1):
+def get_precip_obs(s, d0, d1, verbose=False):
 
     # Tokens registered to michael.wessler@noaa.gov
     api_token = 'a2386b75ecbc4c2784db1270695dde73'
@@ -73,7 +73,8 @@ def get_precip_obs(s, d0, d1):
         
         df = []
         while repeat > 0:
-            print('Working: Interval {}h Iteration {}'.format(interval, repeat))
+            if verbose:
+                print('Working: Interval {}h Iteration {}'.format(interval, repeat))
                         
             _d0 = d0+timedelta(hours=(forecast_interval)*(repeat-1))
             _d1 = d1+timedelta(hours=1+forecast_interval*(repeat-1))
@@ -411,7 +412,8 @@ def get_nbm_1d(_stid, verbose=False):
     if os.path.isfile(nbmfile):
         # Load file
         _nbm = pd.read_pickle(nbmfile)
-        print('Loaded NBM from file %s'%nbmfile)
+        if verbose:
+            print('Loaded NBM from file %s'%nbmfile)
 
     else:
         url_list = []
@@ -433,11 +435,13 @@ def get_nbm_1d(_stid, verbose=False):
             header = _nbm[0, 0]
             
         except:
-            print('No NBM 1D Flat File for %s'%_stid)
+            if verbose:
+                print('No NBM 1D Flat File for %s'%_stid)
             _nbm = (_stid, None)
             
         else:
-            print('Producing NBM data from 1D Flat File for %s'%_stid)
+            if verbose:
+                print('Producing NBM data from 1D Flat File for %s'%_stid)
             # This drops days with incomplete collections. There may be some use
             # to keeping this data, can fix in the future if need be
             # May also want to make the 100 value flexible!
@@ -460,30 +464,56 @@ def get_nbm_1d(_stid, verbose=False):
             init =  _nbm.index.get_level_values(0)
             valid = _nbm.index.get_level_values(1)
 
-            # Note the 1h 'fudge factor' in the lead time here
-            lead = pd.DataFrame(
-                np.transpose([init, valid, ((valid - init).values/3600/1e9).astype(int)+1]), 
-                columns=['InitTime', 'ValidTime', 'LeadTime']).set_index(['InitTime', 'ValidTime'])
+#             # Note the 1h 'fudge factor' in the lead time here
+#             lead = pd.DataFrame(
+#                 np.transpose([init, valid, ((valid - init).values/3600/1e9).astype(int)+1]), 
+#                 columns=['InitTime', 'ValidTime', 'LeadTime']).set_index(['InitTime', 'ValidTime'])
 
-            _nbm.insert(0, 'LeadTime', lead)
+#             _nbm.insert(0, 'LeadTime', lead)
 
             klist = np.array([k for k in np.unique([k for k in list(_nbm.keys())]) if ('APCP' in k)&('1hr' not in k)])
             klist = klist[np.argsort(klist)]
-            klist = np.append('LeadTime', klist)
+#             klist = np.append('LeadTime', klist)
             _nbm = _nbm.loc[:, klist]
 
-            # Nix values where lead time shorter than acc interval
-            for k in _nbm.keys():
-                if 'APCP24hr' in k:
-                    _nbm[k][_nbm['LeadTime'] < 24] = np.nan
-                elif 'APCP12hr' in k:
-                    _nbm[k][_nbm['LeadTime'] < 12] = np.nan
-                elif 'APCP6hr' in k:
-                    _nbm[k][_nbm['LeadTime'] < 6] = np.nan
-                else:
-                    pass
-
+#             # Nix values where lead time shorter than acc interval
+#             for k in _nbm.keys():
+#                 if 'APCP24hr' in k:
+#                     _nbm[k][_nbm['LeadTime'] < 24] = np.nan
+#                 elif 'APCP12hr' in k:
+#                     _nbm[k][_nbm['LeadTime'] < 12] = np.nan
+#                 elif 'APCP6hr' in k:
+#                     _nbm[k][_nbm['LeadTime'] < 6] = np.nan
+#                 else:
+#                     pass
+                
             _nbm.to_pickle(nbmfile)
-            print('\nSaved NBM to file %s'%nbmfile)
+            if verbose:
+                print('\nSaved NBM to file %s'%nbmfile)
     
     return (_stid, _nbm)
+
+def get_precip_obs_mp(_stid, verbose=False):
+        
+    obfile = _datadir + '%s_obs_%s_%s.pd'%(_stid, _date0.strftime('%Y%m%d'), _date1.strftime('%Y%m%d'))
+
+    if os.path.isfile(obfile):
+        # Load file
+        iobs = pd.read_pickle(obfile)
+        if verbose:
+            print('Loaded obs from file %s'%obfile)
+
+    else:
+        # Get and save file
+        iobs = get_precip_obs(_stid, _date0, _date2, verbose=False)
+        iobs = iobs[0].merge(iobs[1], how='inner', on='ValidTime').merge(iobs[2], how='inner', on='ValidTime')
+        iobs = iobs[[k for k in iobs.keys() if 'precip' in k]].sort_index()
+
+        iobs.to_pickle(obfile)
+        if verbose:
+            print('Saved obs to file %s\n'%obfile)
+    
+    iobs['Site'] = np.full(iobs.index.size, fill_value=_stid, dtype='U10')
+    iobs = iobs.reset_index().set_index(['ValidTime', 'Site'])
+    
+    return iobs
