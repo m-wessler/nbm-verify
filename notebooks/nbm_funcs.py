@@ -555,14 +555,16 @@ def reliability_verif_cdf_multistation(_data, _interval, _short, _long, _plot_ty
         hist_spread.append(histy)
     hist_spread = np.array(hist_spread)
     
-    # shade_lo = hist_spread.min(axis=0)
-    # shade_hi = hist_spread.max(axis=0)
-    # plt.fill_between(histx, shade_lo, shade_hi, color='gray', alpha=0.35, label='Data Range')
+    shade_lo = hist_spread.min(axis=0)
+    shade_hi = hist_spread.max(axis=0)
+    plt.fill_between(histx, shade_lo, shade_hi, color='gray', alpha=0.35, label='Data Range')
     
     conf_alpha = 0.05
     conf = np.array([sms.DescrStatsW(x).tconfint_mean(alpha=conf_alpha) for x in hist_spread.T])
-    ax.fill_between(histx, conf[:, 0], conf[:, 1], color='gray', alpha=0.35,
-                    label='%d/%d CI'%(conf_alpha*100, (1-conf_alpha)*100))
+#     ax.fill_between(histx, conf[:, 0], conf[:, 1], color='gray', alpha=0.35,
+#                     label='%d/%d CI'%(conf_alpha*100, (1-conf_alpha)*100))
+    ax.plot(histx, conf[:, 0], 'r--', alpha=0.85, linewidth=0.8)
+    ax.plot(histx, conf[:, 1], 'r--', alpha=0.85, linewidth=0.8, label='5/95 CI')
     
     ax.plot(np.arange(0, 101, 1), np.arange(0, 101, 1), '--k', linewidth=1, zorder=20)
 
