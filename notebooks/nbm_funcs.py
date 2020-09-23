@@ -103,13 +103,19 @@ def get_precip_obs(s, d0, d1, verbose=False):
                         pass
                     else:
                         #print('{}\t{}\t{}\t{}'.format(vtime, last_rep, lag_mins, value))
-                        df.append([vtime, last_rep, lag_mins, value])
+                        df.append([vtime, lag_mins, value])
                     
             repeat -= 1
 
-        allints.append(pd.DataFrame(df, 
-            columns=['ValidTime', 'last_report', '%sh_lag_mins'%interval, '%sh_precip_mm'%interval]
-            ).set_index('ValidTime').sort_index())
+        df = pd.DataFrame(df, 
+            columns=['ValidTime', '%sh_lag_mins'%interval, '%sh_precip_mm'%interval]
+            ).set_index('ValidTime').sort_index()       
+        
+        df = df[~df.index.duplicated(keep='first')]
+        df = df.reindex(pd.date_range(df.index[0], df.index[-1], freq='6H'))
+        df.index.rename('ValidTime', inplace=True)
+                
+        allints.append(df)
 
     return allints
 
