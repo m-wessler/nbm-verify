@@ -119,13 +119,15 @@ def get_precip_obs(s, d0, d1, verbose=False):
 
     return allints
 
-def apcp_dist_plot(_obs, _nbm, _interval, show=False):
+def apcp_dist_plot(_obs, _nbm, _interval, trimZero=True, show=False):
     
     iobs = _obs['%dh_precip_in'%_interval]
-    iobs[iobs <= 0.01] = np.nan
+    #iobs[iobs <= 0.01] = np.nan
+    iobs = iobs[iobs > 0.01] if trimZero else iobs
     
     ifx = _nbm['APCP%dhr_surface'%_interval]
-    ifx[ifx <= 0.01] = np.nan
+    #ifx[ifx <= 0.01] = np.nan
+    ifx = ifx[ifx > 0.01] if trimZero else ifx
     
     _threshold = np.append(0, np.nanpercentile(iobs, (33, 67, 100)))
     #_threshold = np.array([np.ceil(x*10)/10 for x in _threshold])
