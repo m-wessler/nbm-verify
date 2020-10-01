@@ -6,20 +6,22 @@ import xarray as xr
 from glob import glob
 from functools import partial
 from os import makedirs as mkdir
-from multiprocessing import get_context
+from multiprocessing import get_context, cpu_count
 from datetime import datetime, timedelta
 
 os.environ['OMP_NUM_THREADS'] = '1'
 
-nlat, xlat = 40, 41
-nlon, xlon = -112, -111
+nlat, xlat = 47, 48 #33.5, 42.0
+nlon, xlon = -122, -121 #-114.0, -104.5
 
-mp_cores = 30
+mp_cores = cpu_count()*2
 remove_gribs = False
 mm_in = 1/25.4
 
 def download_grib(url, subset_str, tmp):
     import requests
+    
+    # Needs filesize check and redownload attempts for junk
     
     filename = url.split('file=')[1].split('&')[0]
     filename = filename.replace('.co.', '.%s.'%subset_str)
@@ -45,7 +47,7 @@ def repack_nbm_grib2(f):
         init = datetime.strptime(init, '%Y%m%d%H%M')
         
         fhr = msgs[0]['endStep']
-        valid = np.datetime64(init + timedelta(hours=fhr))
+        valid = np.array(init + timedelta(hours=fhr), dtype='datetime64[s]')
         
         lons, lats = msgs[0].data()[2], msgs[0].data()[1]
         
@@ -135,8 +137,101 @@ def repack_nbm_grib2(f):
 
         return ds
     
-    def write_netcdf():
-        return None
+def write_netcdf(ds, ncfilename, complevel=9):
+    import netCDF4 as nc
+    from pandas import to_datetime as dt
+    
+    with nc.Dataset(ncfilename, 'w', format='NETCDF4') as ncfile:
+
+        ncfile.nx = str(ds['lons'].shape[1])
+        ncfile.ny = str(ds['lons'].shape[0])
+
+        ncfile.InitTime = ds.attrs['InitTime']
+
+        # Lat Lon dimensions and data
+        ncfile.createDimension('lon', ds['lons'].shape[1])
+        ncfile.createDimension('lat', ds['lons'].shape[0])
+        ncfile.createDimension('time', ds['time'].size)
+        ncfile.createDimension('interval', ds['interval'].size)
+        ncfile.createDimension('percentile', ds['percentile'].size)
+        ncfile.createDimension('threshold', ds['threshold'].size)
+
+        lon_nc = ncfile.createVariable('lon', 'f4', ('lat', 'lon'), 
+                                       zlib=True, complevel=complevel)
+        lon_nc.long_name = 'Longitude'
+        lon_nc.units = 'degrees_east'
+        lon_nc.standard_name = 'longitude'
+        lon_nc._CoordinateAxisType = 'Lon'
+
+        lat_nc = ncfile.createVariable('lat', 'f4', ('lat', 'lon'), 
+                                       zlib=True, complevel=complevel)
+        lat_nc.long_name = 'Latitude'
+        lat_nc.units = 'degrees_north'
+        lat_nc.standard_name = 'latitude'
+        lat_nc._CoordinateAxisType = 'Lat'
+
+        lon_nc[:] = ds['lons'].values
+        lat_nc[:] = ds['lats'].values
+
+        time = ncfile.createVariable('time', 'f4', ('time'), 
+                                     zlib=True, complevel=complevel)
+        time.long_name = 'Valid Time'
+        time.unit = "hours since 1970-01-01 00:00:00"
+        time.standard_name = 'time'
+        time[:] = ([(t.astype('datetime64[h]') - np.datetime64('1970-01-01T00:00:00')) / 
+                    np.timedelta64(1, 'h') for t in output.time.values])
+        
+        interval = ncfile.createVariable('interval', 'short', ('interval'), 
+                                         zlib=True, complevel=complevel)
+        interval.long_name = 'Accumulation Interval'
+        interval.units = 'hours'
+        interval.standard_name = 'interval'
+        interval[:] = ds['interval'].values.astype(int)
+
+        percentile = ncfile.createVariable('percentile', 'short', ('percentile'), 
+                                           zlib=True, complevel=complevel)
+        percentile.long_name = 'Accumulation Percentile'
+        percentile.units = 'none'
+        percentile.standard_name = 'percentile'
+        percentile[:] = ds['percentile'].values.astype(int)
+
+        threshold = ncfile.createVariable('threshold', 'f4', ('threshold'), 
+                                          zlib=True, complevel=complevel)
+        threshold.long_name = 'Probabiity of Exceedence Threshold'
+        threshold.units = 'in'
+        threshold.standard_name = 'threshold'
+        threshold[:] = ds['threshold'].values
+
+        # Write variable data
+        qpf_nc = ncfile.createVariable('qpf', 'f4', ('time', 'interval', 'lat', 'lon'), 
+                                       fill_value=-9999.0, zlib=True, complevel=complevel)
+        qpf_nc.long_name = 'Deterministic QPF'
+        qpf_nc.level = '0'
+        qpf_nc.units = 'in'
+        qpf_nc[:] = ds['qpf'].values
+
+        pop_nc = ncfile.createVariable('pop', 'f4', ('time', 'interval', 'lat', 'lon'), 
+                                       fill_value=-9999.0, zlib=True, complevel=complevel)
+        pop_nc.long_name = 'Probability of Precipitation (> 0.01")'
+        pop_nc.level = '0'
+        pop_nc.units = 'in'
+        pop_nc[:] = ds['pop'].values
+
+        pqpf_nc = ncfile.createVariable('pqpf', 'f4', ('time', 'interval', 'percentile', 'lat', 'lon'), 
+                                        fill_value=-9999.0, zlib=True, complevel=complevel)
+        pqpf_nc.long_name = 'Probabilistic QPF'
+        pqpf_nc.level = '0'
+        pqpf_nc.units = 'in'
+        pqpf_nc[:] = ds['pqpf'].values
+
+        probx_nc = ncfile.createVariable('probx', 'f4', ('time', 'interval', 'threshold', 'lat', 'lon'), 
+                                         fill_value=-9999.0, zlib=True, complevel=complevel)
+        probx_nc.long_name = 'Probability of Exceedence'
+        probx_nc.level = '0'
+        probx_nc.units = '%'
+        probx_nc[:] = ds['probx'].values
+
+    return None
 
 if __name__ == '__main__':
     
@@ -150,7 +245,7 @@ if __name__ == '__main__':
 
     url_list = []
     # Need to fix the data processing below to allow for sub24 leads
-    for fhr in np.arange(24+6, 180+1, 6):
+    for fhr in np.arange(6, 180+1, 6):
         file = 'file=blend.t{:02d}z.qmd.f{:03d}.co.grib2'.format(hh, fhr)
         url_list.append(base + file + var + region + mdir)
 
@@ -175,11 +270,10 @@ if __name__ == '__main__':
             p.close()
             p.join()
             
-        output = xr.concat(sorted([i for i in output if i is not None]), dim='time')
+        output = xr.concat([i for i in output if i is not None], dim='time')
 
-#         compress = {'compression':'gzip', 'compression_opts':9}
-#         encoding = {var:compress for var in output.data_vars if var != 'time'}
-        output.to_netcdf(tmpdir + './test_output.nc')#, engine='h5netcdf', encoding=encoding)
+        output_filename = 'blend.{}.t{:02d}z.qmd.WR.nc'.format(init.strftime('%Y%m%d'), hh)
+        write_netcdf(output, ncfilename=tmpdir+output_filename)
         
         if remove_gribs:
             [os.remove(f) for f in filelist]
