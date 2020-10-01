@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import xarray as xr
 
@@ -13,19 +14,24 @@ os.environ['OMP_NUM_THREADS'] = '1'
 nlat, xlat = 40, 41
 nlon, xlon = -112, -111
 
+mp_cores = 30
+remove_gribs = False
+mm_in = 1/25.4
+
 def download_grib(url, subset_str, tmp):
     import requests
     
     filename = url.split('file=')[1].split('&')[0]
     filename = filename.replace('.co.', '.%s.'%subset_str)
     
-    print('Downloading: %s'%url)
-
     if not os.path.isfile(tmp + filename):
+        print('Downloading: %s'%url)
         r = requests.get(url, allow_redirects=True)
         open(tmp + filename, 'wb').write(r.content)
+    else:
+        print('Exists, skipping: %s'%filename)
     
-    return None
+    return filename
 
 def repack_nbm_grib2(f):
     import pygrib
@@ -60,13 +66,13 @@ def repack_nbm_grib2(f):
 
             if 'Probability of event' in str(msg):    
                     # Probability of event above upper limit (> 0.254) NOT inclusive
-                    threshold = round(msg['upperLimit']/25.4, 2)
+                    threshold = round(msg['upperLimit']*mm_in, 2)
                     probability.append([msg.values])
                     probability_labels.append([interval, threshold])
 
             elif 'percentileValue' in msg.keys():                
                 percentile.append([msg.values])
-                # percentile_labels.append(str([interval, msg['percentileValue']]))
+                percentile_labels.append([interval, msg['percentileValue']])
 
             else:
                 if got_deterministic[interval] == False:
@@ -84,31 +90,37 @@ def repack_nbm_grib2(f):
         deterministic_labels = deterministic_labels[np.argsort(deterministic_labels)]
         deterministic = np.array(deterministic)[np.argsort(deterministic_labels)]
 
-        probability = np.array(probability, dtype=object).reshape(-1, lats.shape[0], lats.shape[1])
-        probability_labels = np.array(probability_labels)
+        probability_labels = np.array(probability_labels)        
+        probability = np.array(probability, dtype=object).reshape(
+            -1, lats.shape[0], lats.shape[1])
 
-        percentile = np.array(percentile, dtype=object).reshape(-1, 99, lats.shape[0], lats.shape[1])
-        # percentile_labels = np.array(percentile_labels)
-
-        deterministic = xr.DataArray(deterministic.astype(np.float32), name='pop',
-                        dims=('interval', 'y', 'x'),
+        percentile_labels = np.array(percentile_labels)
+        n_perc_intervals = np.unique(percentile_labels[:, 0]).size
+        
+        percentile = np.array(percentile, dtype=object).reshape(
+            n_perc_intervals, 99, lats.shape[0], lats.shape[1])
+        
+        deterministic = xr.DataArray(deterministic.astype(np.float32)*mm_in, name='pop',
+                        dims=('interval', 'x', 'y'),
                         coords={'interval':('interval', deterministic_labels),
-                                'lats':(('y', 'x'), lats), 'lons':(('y', 'x'), lons)})
+                                'lats':(('x', 'y'), lats), 'lons':(('x', 'y'), lons)})
 
         pop = xr.DataArray(probability[:3].astype(np.float32), name='pop',
-                        dims=('interval', 'y', 'x'),
+                        dims=('interval', 'x', 'y'),
                         coords={'interval':('interval', probability_labels[:3, 0]),
-                                'lats':(('y', 'x'), lats), 'lons':(('y', 'x'), lons)})
+                                'lats':(('x', 'y'), lats), 'lons':(('x', 'y'), lons)})
 
         probability = xr.DataArray([probability[2:].astype(np.float32)], name='probability',
-                        dims=('interval', 'threshold', 'y', 'x'),
+                        dims=('interval', 'threshold', 'x', 'y'),
                         coords={'interval':('interval', [24]), 'threshold':('threshold', probability_labels[2:,1]),
-                                'lats':(('y', 'x'), lats), 'lons':(('y', 'x'), lons)})
+                                'lats':(('x', 'y'), lats), 'lons':(('x', 'y'), lons)})
 
-        percentile = xr.DataArray(percentile.astype(np.float32), name='percentile',
-                        dims=('interval', 'percentile', 'y', 'x'),
-                        coords={'interval':('interval', [6, 12, 24]), 'percentile':('percentile', range(1, 100)),
-                                'lats':(('y', 'x'), lats), 'lons':(('y', 'x'), lons)})
+        # print(fhr, percentile_labels, percentile.shape)
+        percentile = xr.DataArray(percentile.astype(np.float32)*mm_in, name='percentile',
+                        dims=('interval', 'percentile', 'x', 'y'),
+                        coords={'interval':('interval', np.unique(percentile_labels[:, 0])), 
+                                'percentile':('percentile', range(1, 100)),
+                                'lats':(('x', 'y'), lats), 'lons':(('x', 'y'), lons)})
 
         ds = xr.Dataset()
         
@@ -122,10 +134,13 @@ def repack_nbm_grib2(f):
         ds['pqpf'] = percentile
 
         return ds
+    
+    def write_netcdf():
+        return None
 
 if __name__ == '__main__':
-    # Set up init to use sys.argv later
-    init = datetime(2020, 9, 30, 12)
+    
+    init = datetime.strptime(sys.argv[1], '%Y%m%d%H')
     yyyy, mm, dd, hh = init.year, init.month, init.day, init.hour
 
     base = 'https://nomads.ncep.noaa.gov/cgi-bin/filter_blend.pl?'
@@ -144,21 +159,30 @@ if __name__ == '__main__':
 
     download_grib_mp = partial(download_grib, subset_str='WR', tmp=tmpdir)
 
-    with get_context('fork').Pool(16) as p:
-        p.map(download_grib_mp, url_list, chunksize=1)
+    with get_context('fork').Pool(mp_cores) as p:
+        filelist_download = p.map(download_grib_mp, url_list, chunksize=1)
         p.close()
         p.join()
 
     filelist = sorted(glob(tmpdir + '*.grib2'))
+    
+    # Ensure all files were downloaded
+    if ([f.split('/')[-1] for f in filelist] 
+        == sorted([f for f in filelist_download])):
 
-    with get_context('fork').Pool(16) as p:
-        output = p.map(repack_nbm_grib2, filelist, chunksize=1)
-        p.close()
-        p.join()    
+        with get_context('fork').Pool(mp_cores) as p:
+            output = p.map(repack_nbm_grib2, filelist, chunksize=1)
+            p.close()
+            p.join()
+            
+        output = xr.concat(sorted([i for i in output if i is not None]), dim='time')
+
+#         compress = {'compression':'gzip', 'compression_opts':9}
+#         encoding = {var:compress for var in output.data_vars if var != 'time'}
+        output.to_netcdf(tmpdir + './test_output.nc')#, engine='h5netcdf', encoding=encoding)
         
-    output = [repack_nbm_grib2(file) for file in filelist]
-    output = xr.concat([i for i in output if i is not None], dim='time')
-
-    compress = {'compression':'gzip', 'compression_opts':9}
-    encoding = {var:compress for var in output.data_vars if var != 'time'}
-    output.to_netcdf(tmp + './test_output.nc', engine='h5netcdf', encoding=encoding)
+        if remove_gribs:
+            [os.remove(f) for f in filelist]
+    
+    else:
+        print('Missing files, re-run %s'%init)
