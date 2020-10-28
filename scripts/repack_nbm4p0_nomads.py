@@ -12,13 +12,13 @@ from datetime import datetime, timedelta
 os.environ['OMP_NUM_THREAD'] = '1'
 
 # Set up init to use sys.argv later
-init = datetime(2020, 10, 7, 12)
+init = datetime(2020, 10, 28, 0)
 
 nlat, xlat = 30, 50
 nlon, xlon = -130, -100
 
-tmpdir = '/scratch/general/lustre/u1070830/nbm/tmp/'; mkdir(tmpdir, exist_ok=True)
-datadir = '/scratch/general/lustre/u1070830/nbm/'; mkdir(datadir, exist_ok=True)
+tmpdir = '/scratch/general/lustre/u1070830/nomads_nbm/tmp/'; mkdir(tmpdir, exist_ok=True)
+datadir = '/scratch/general/lustre/u1070830/nomads_nbm/'; mkdir(datadir, exist_ok=True)
 
 def download_grib(url, subset_str, tmp):
     from subprocess import Popen, call
@@ -26,15 +26,15 @@ def download_grib(url, subset_str, tmp):
     
     filename = url.split('file=')[1].split('&')[0]
     filename = filename.replace('.co.', '.%s.'%subset_str)
-        
+                
     if not os.path.isfile(tmp + filename):
         print('Downloading %s'%filename)
         
         r = requests.get(url, allow_redirects=True)
         open(tmp + filename, 'wb').write(r.content)
         
-        # cmd = 'wget -O "%s" "%s"'%(tmp + filename, url)
-        # Popen(cmd, shell=True)
+        cmd = 'wget -O "%s" "%s"'%(tmp + filename, url)
+        Popen(cmd, shell=True)
     
     return filename
 
@@ -49,7 +49,7 @@ def repack_nbm_grib2(f):
         try:
             grb = pygrib.open(f)
             msgs = grb.read()
-
+            
             init = str(msgs[0]).split(':')[-2].split(' ')[-1]
             init = datetime.strptime(init, '%Y%m%d%H%M')
 
@@ -147,10 +147,10 @@ def repack_nbm_grib2(f):
         print('Found: %s, skipping'%f.split('/')[-1])
         
 def write_output(output, ncfilename):
-    
-    # ncfilename = './output.ncCustom.nc'
+     
     lat, lon = output['lats'], output['lons']
 
+    os.makedirs(tmpdir, exist_ok=True)
     with nc.Dataset(tmpdir + ncfilename, 'w', format='NETCDF4') as ncfile:
 
         ncfile.nx = str(lon.shape[1])
@@ -202,19 +202,19 @@ def write_output(output, ncfilename):
         threshold[:] = output['threshold'].values
 
         # Write variable data
-#         qpf_nc = ncfile.createVariable('qpf', 'f4', ('time', 'interval', 'lat', 'lon'), 
-#                                        fill_value=-9999.0, zlib=True, complevel=9)
-#         qpf_nc.long_name = 'Deterministic QPF'
-#         qpf_nc.level = '0'
-#         qpf_nc.units = 'in'
-#         qpf_nc[:] = output['qpf'].values
+        qpf_nc = ncfile.createVariable('qpf', 'f4', ('time', 'interval', 'lat', 'lon'), 
+                                       fill_value=-9999.0, zlib=True, complevel=9)
+        qpf_nc.long_name = 'Deterministic QPF'
+        qpf_nc.level = '0'
+        qpf_nc.units = 'in'
+        qpf_nc[:] = output['qpf'].values
 
-#         pop_nc = ncfile.createVariable('pop', 'f4', ('time', 'interval', 'lat', 'lon'), 
-#                                        fill_value=-9999.0, zlib=True, complevel=9)
-#         pop_nc.long_name = 'Probability of Precipitation (> 0.01")'
-#         pop_nc.level = '0'
-#         pop_nc.units = 'in'
-#         pop_nc[:] = output['pop'].values
+        # pop_nc = ncfile.createVariable('pop', 'f4', ('time', 'interval', 'lat', 'lon'), 
+        #     fill_value=-9999.0, zlib=True, complevel=9)
+        # pop_nc.long_name = 'Probability of Precipitation (> 0.01")'
+        # pop_nc.level = '0'
+        # pop_nc.units = 'in'
+        # pop_nc[:] = output['pop'].values
 
         pqpf_nc = ncfile.createVariable('pqpf', 'f4', ('time', 'interval', 'percentile', 'lat', 'lon'), 
                                         fill_value=-9999.0, zlib=True, complevel=9)
@@ -257,19 +257,21 @@ if __name__ == '__main__':
 
     flist = sorted(flist)
     filelist = sorted(glob(tmpdir + '*.grib2'))
+            
+    print(filelist[0])
+    
+    repack_nbm_grib2(filelist[0])
         
-    with get_context('forkserver').Pool(6) as p:
-        output = p.imap_unordered(repack_nbm_grib2, filelist, chunksize=1)
-        p.close()
-        p.join()
+#     with get_context('forkserver').Pool(6) as p:
+#         output = p.imap_unordered(repack_nbm_grib2, filelist, chunksize=1)
+#         p.close()
+#         p.join()
     
-    output = [xr.open_dataset(f+'.nc') for f in filelist]
-    output = xr.concat([i for i in output if i is not None], dim='time')
+#     output = [xr.open_dataset(f+'.nc') for f in filelist]
+#     output = xr.concat([i for i in output if i is not None], dim='time')
     
-    # print(output)
-    
-    write_output(output)
+#     write_output(output)
 
-    # compress = {'compression':'gzip', 'compression_opts':9}
-    # encoding = {var:compress for var in output.data_vars if var != 'time'}
-    # output.to_netcdf(tmpdir + './test_output.nc', engine='h5netcdf', encoding=encoding)
+#     compress = {'compression':'gzip', 'compression_opts':9}
+#     encoding = {var:compress for var in output.data_vars if var != 'time'}
+#     output.to_netcdf(tmpdir + './test_output.nc', engine='h5netcdf', encoding=encoding)
