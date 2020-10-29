@@ -1,13 +1,12 @@
 import os, gc
 import pygrib
-import cfgrib
-import pandas as pd
 import numpy as np
+import pandas as pd
 import xarray as xr
-import matplotlib.pyplot as plt
 import multiprocessing as mp
 
 from glob import glob
+from functools import partial
 from datetime import datetime, timedelta
 
 os.environ['OMP_NUM_THREADS'] = '1'
@@ -97,10 +96,12 @@ if __name__ == '__main__':
             
     nbm_flist_agg = np.hstack(nbm_flist_agg)
     
-    # 128 workers ~ 90GB RAM
+    unpack_fhr_mp = partial(unpack_fhr, xinterval=extract_interval, xthreshold=extract_threshold)
+    
+    # 128 workers ~ 100GB RAM
     workers = 128
     with mp.get_context('fork').Pool(workers) as p:
-        returns = p.map(unpack_fhr, nbm_flist_agg, chunksize=1)
+        returns = p.map(unpack_fhr_mp, nbm_flist_agg, chunksize=1)
         p.close()
         p.join()
         
