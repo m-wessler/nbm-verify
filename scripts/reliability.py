@@ -17,10 +17,13 @@ os.environ['OMP_NUM_THREADS'] = '1'
 cwa = sys.argv[1]
 fhr_start, fhr_end, fhr_step = 24, 108, 6
 
-start_date = datetime(2020, 10, 1, 0)
-end_date = datetime(2020, 12, 3, 0)
+# start_date = datetime(2020, 10, 1, 0)
+# end_date = datetime(2020, 12, 3, 0)
 
-produce_thresholds = [0.01, 0.25, 0.50]
+start_date = datetime(2020, 5, 22, 12)
+end_date = datetime(2020, 10, 1, 0)
+
+produce_thresholds = [0.50] #0.01, 0.1, 0.25, 1.0, 2.0
 bint, bins_custom = 5, None
 
 cwa_bounds = {
