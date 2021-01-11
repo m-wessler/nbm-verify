@@ -109,13 +109,13 @@ if __name__ == '__main__':
     
     # TEST THE NEW CODE ON A SMALLER SUBSET!!!!
     inits = pd.date_range(
-        datetime(2020, 5, 15, init_hour, 0),
-        datetime(2020, 12, 15, init_hour, 0),
+        datetime(2020, 5, 18, init_hour, 0),
+        datetime(2021, 1, 1, init_hour, 0),
         freq=init_freq)
         
-    for forecast_hour in np.arange(24, 180+1, 6):
+    for forecast_hour in np.arange(24, 168+1, 24):
 
-        outdir = nbm_dir + 'extract/'
+        outdir = nbm_dir + 'extract_new/'
         os.makedirs(outdir, exist_ok=True)
         outfile = 'nbm_probx_fhr%03d.nc'%forecast_hour
 

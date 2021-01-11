@@ -6,7 +6,6 @@ import xarray as xr
 import multiprocessing as mp
 import matplotlib.pyplot as plt 
 
-
 from glob import glob
 from functools import partial
 from matplotlib import gridspec
