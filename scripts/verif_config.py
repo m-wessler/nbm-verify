@@ -9,13 +9,13 @@ fig_dir = '/uufs/chpc.utah.edu/common/home/steenburgh-group10/mewessler/nbm/'
 # First data (2020, 5, 18, 0)
 # NBM v3.2 > v4.0 @ (2020, 9, 30, 12)
 
-ver = '3p2'
-start_date = datetime(2020, 6, 1, 0)
-end_date = datetime(2020, 10, 1, 0)
+# ver = '3p2'
+# start_date = datetime(2020, 6, 1, 0)
+# end_date = datetime(2020, 10, 1, 0)
 
-# ver = '4p0'
-# start_date = datetime(2020, 10, 1, 0)
-# end_date = datetime(2021, 1, 1, 0)
+ver = '4p0'
+start_date = datetime(2020, 10, 1, 0)
+end_date = datetime(2021, 2, 1, 0)
 
 # First, last forecast hour and interval to use
 fhr_start, fhr_end, fhr_step = 24, 168, 24
@@ -34,5 +34,5 @@ n_events = 3
 # Condense the lat lon grid with box filter
 # Right now this only applies to the reliability maps
 # Need to experiment with generalizing this
-cx = 4 #8 if cwa == 'WESTUS' else 4
+cx = 4
 cy = cx

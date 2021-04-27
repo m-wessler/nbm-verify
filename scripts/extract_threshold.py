@@ -109,8 +109,8 @@ if __name__ == '__main__':
     
     # TEST THE NEW CODE ON A SMALLER SUBSET!!!!
     inits = pd.date_range(
-        datetime(2020, 5, 18, init_hour, 0),
-        datetime(2021, 1, 1, init_hour, 0),
+        datetime(2020, 10, 1, init_hour, 0),
+        datetime(2021, 2, 1, init_hour, 0),
         freq=init_freq)
         
     for forecast_hour in np.arange(24, 168+1, 24):

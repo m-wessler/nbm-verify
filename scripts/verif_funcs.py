@@ -177,3 +177,143 @@ def extract_brier(_fhr, _urma, _idx, _mask):
         data.append(xr.merge([BS, BS_cl, BSS]))
 
     return xr.concat(data, dim='thresh')
+
+def extract_pqpf_verif_stats(_fhr, _urma, _idx, _mask):
+    import gc
+    
+    nbm_file = glob(nbm_dir + 'extract/nbm_probx_fhr%03d.nc'%_fhr)[0]
+    print(nbm_file)
+    
+    # Subset the threshold value
+    nbm = xr.open_dataset(nbm_file)['probx'].sel(
+    y=slice(_idx[0].min(), _idx[0].max()),
+    x=slice(_idx[1].min(), _idx[1].max()))
+
+    # Subset the times
+    nbm_time = nbm.valid
+    urma_time = _urma.valid
+    time_match = nbm_time[np.in1d(nbm_time, urma_time)].values
+    time_match = np.array([t for t in time_match if pd.to_datetime(t) >= start_date])
+    time_match = np.array([t for t in time_match if pd.to_datetime(t) <= end_date])
+    date0 = pd.to_datetime(time_match[0]).strftime('%Y/%m/%d %H UTC')
+    date1 = pd.to_datetime(time_match[-1]).strftime('%Y/%m/%d %H UTC')
+
+    _nbm = nbm.sel(valid=time_match)
+    _urma = _urma.sel(valid=time_match)
+    nbm_mask, _nbm = xr.broadcast(_mask, _nbm)
+    urma_mask, _urma = xr.broadcast(_mask, _urma)
+
+    _nbm_masked = xr.where(nbm_mask, _nbm, np.nan)
+    _urma_masked = xr.where(urma_mask, _urma, np.nan)
+        
+    data = []
+    
+    for thresh in produce_thresholds:
+        
+        print('Processing f%03d %.2f"'%(_fhr, thresh))
+
+        _nbm_masked_select = _nbm_masked.sel(threshold=thresh)/100
+        
+        bins = np.arange(0, 101, 10)
+
+        N = xr.where(~np.isnan(_nbm_masked_select), 1, 0).sum()
+        n = xr.where(_urma_masked > thresh, 1, 0).sum()
+        o = n/N
+        uncertainty = o * (1 - o)
+        
+        reliability_inner = []
+        resolution_inner = []
+        reliability_diagram = []
+        roc_diagram = []
+
+        for i, bounds in enumerate(zip(bins[:-1], bins[1:])):
+
+            left, right = np.array(bounds)/100
+            center = round(np.mean([left, right]), 2)
+            
+            fk = xr.where((_nbm_masked_select > left) & (_nbm_masked_select <= right), _nbm_masked_select, np.nan)
+            nk = xr.where((_nbm_masked_select > left) & (_nbm_masked_select <= right), 1, 0).sum()
+
+            ok_count = xr.where((_nbm_masked_select > left) & (_nbm_masked_select <= right) & (_urma_masked > thresh), 1, 0).sum()
+            ok = ok_count/nk
+            
+            #        3D          1D     3D   1D
+            _reliability_inner = nk * ((fk - ok)**2)
+            _reliability_inner['center'] =left
+            reliability_inner.append(_reliability_inner)
+
+            #        1D         1D     1D   1D
+            _resolution_inner = nk * ((ok - o)**2)
+            _resolution_inner['center'] =left
+            resolution_inner.append(_resolution_inner)
+            
+            reliability_diagram.append([center, ok.values])
+                        
+            hit = xr.where((_nbm_masked_select > left) & (_urma_masked > thresh), 1, 0).sum(dim='valid')
+            false_alarm = xr.where((_nbm_masked_select > left) & (_urma_masked <= thresh), 1, 0).sum(dim='valid')
+            
+            observed_yes = xr.where(_urma_masked > thresh, 1, 0).sum(dim='valid')
+            observed_no = xr.where(_urma_masked <= thresh, 1, 0).sum(dim='valid')
+            forecasted_yes = xr.where(_nbm_masked_select > left, 1, 0).sum(dim='valid')
+            
+            hit_rate = hit/observed_yes
+            false_alarm_rate = false_alarm/observed_no
+            false_alarm_ratio = false_alarm/forecasted_yes
+            freq_bias = forecasted_yes/observed_yes
+
+            a_ref = (observed_yes * forecasted_yes) / nk
+            miss = xr.where((_nbm_masked_select <= left) & (_urma_masked > thresh), 1, 0).sum(dim='valid')
+            ets = (hit - a_ref) / (hit - a_ref + false_alarm + miss)
+            
+            roc_diagram.append([
+                false_alarm_rate.mean().values, hit_rate.mean().values, 
+                                left, 
+                false_alarm_ratio.mean().values, ets.mean().values, 
+                                freq_bias.mean().values])
+        
+        reliability_inner = xr.concat(reliability_inner, dim='center')
+        reliability_inner = xr.where(_mask, reliability_inner.sum(dim='center'), np.nan)
+        
+        reliability = (1/N) * reliability_inner
+        reliability = reliability.mean(dim='valid')
+        
+        resolution = (1/N) * xr.concat(resolution_inner, dim='center').sum(dim='center')
+        
+        brier = reliability - resolution + uncertainty
+        brier_score = brier.mean().values
+        
+        brier_skill = 1 - (brier/o)
+        brier_skill_score = brier_skill.mean().values
+        
+        brier = brier.rename('brier')
+        brier_skill = brier_skill.rename('brier_skill')
+        
+        reliability_diagram = np.array(reliability_diagram).T
+        roc_diagram = np.array(roc_diagram).T
+        
+        far = xr.DataArray(roc_diagram[0], dims={'center':roc_diagram[2]}, coords={'center':roc_diagram[2]})
+        hr = xr.DataArray(roc_diagram[1], dims={'center':roc_diagram[2]}, coords={'center':roc_diagram[2]})
+        
+        faratio = xr.DataArray(roc_diagram[3], dims={'center':roc_diagram[2]}, coords={'center':roc_diagram[2]})
+        ets = xr.DataArray(roc_diagram[4], dims={'center':roc_diagram[2]}, coords={'center':roc_diagram[2]})
+        freq_bias = xr.DataArray(roc_diagram[5], dims={'center':roc_diagram[2]}, coords={'center':roc_diagram[2]})
+        
+        data_merge = xr.merge([brier_skill.mean(dim=['x', 'y'])])
+
+        # Need to figure out reliability scaling and add in here as (x, y)
+        data_merge['n_events'] = observed_yes.sum(dim=['x', 'y'])
+        data_merge['ets'] = ets
+        data_merge['freq_bias'] = freq_bias
+        data_merge['hit_rate'] = hr
+        data_merge['false_alarm_rate'] = far
+        data_merge['false_alarm_ratio'] = faratio
+
+        data.append(data_merge)
+        
+        del fk, nk, ok_count, ok, reliability, reliability_inner, resolution
+        del brier, brier_skill, brier_score, brier_skill_score, roc_diagram, reliability_diagram
+        gc.collect()
+    
+    gc.collect()
+                                        
+    return xr.concat(data, dim='thresh')
